@@ -1,4 +1,5 @@
 import * as ts from 'typescript';
+// import * as path from 'path';
 
 import { Path } from '@angular-devkit/core';
 import { Rule, SchematicContext, Tree } from '@angular-devkit/schematics';
@@ -7,6 +8,7 @@ interface IComponentPath {
   componentPath: string;
   templateUrl?: string;
   styleUrls?: string[];
+  componentUrls: string[];
 }
 
 /**
@@ -25,9 +27,9 @@ export function ariesVcr(_options: any): Rule {
       const componentPaths = tsPaths
         .map(path => buildComponentPath(tree, path))
         .filter(path => !!path) as IComponentPath[];
-      const sharedUrlRefs = getSharedUrlRefs(componentPaths);
+      // const sharedUrlRefs = getSharedUrlRefs(componentPaths);
 
-      console.log(sharedUrlRefs);
+      console.log(componentPaths);
 
       return tree;
 
@@ -37,24 +39,24 @@ export function ariesVcr(_options: any): Rule {
   };
 }
 
-function getSharedUrlRefs(componentPaths: IComponentPath[] = []): Set<string> {
-  const urlCounts = componentPaths
-    .reduce((refs, path) => {
-      if (path?.templateUrl) {
-        refs.push(path.templateUrl);
-      }
-      if (path?.styleUrls) {
-        refs.push(...path.styleUrls)
-      }
-      return refs;
-    }, [] as string[])
-    .reduce((counts: any, url: string) => {
-      return { ...counts, [url]: (counts[url] || 0) + 1 }
-    }, {} as { [url: string]: number });
+// function getSharedUrlRefs(componentPaths: IComponentPath[] = []): Set<string> {
+//   const urlCounts = componentPaths
+//     .reduce((refs, path) => {
+//       if (path?.templateUrl) {
+//         refs.push(path.templateUrl);
+//       }
+//       if (path?.styleUrls) {
+//         refs.push(...path.styleUrls)
+//       }
+//       return refs;
+//     }, [] as string[])
+//     .reduce((counts: any, url: string) => {
+//       return { ...counts, [url]: (counts[url] || 0) + 1 }
+//     }, {} as { [url: string]: number });
 
-  return new Set<string>(Object.keys(urlCounts)
-    .filter(url => urlCounts[url] > 1));
-}
+//   return new Set<string>(Object.keys(urlCounts)
+//     .filter(url => urlCounts[url] > 1));
+// }
 
 /**
  * 
@@ -97,11 +99,24 @@ function getComponentImportPath(decoratorMetaDataNode: ts.Node, componentPath: s
   const styleUrlsInint = getMetaDataValue<ts.ArrayLiteralExpression>(
     getMetaDataProperty(decoratorMetaDataNode, 'styleUrls'));
 
+  const templateUrl = templateUrlInit?.text;
+  const styleUrls = styleUrlsInint?.elements.map((element: ts.StringLiteral) => element.text);
+  const componentUrls: string[] = [];
+
+  if (templateUrl) {
+    componentUrls.push(templateUrl);
+  }
+  if (styleUrls) {
+    componentUrls.push(...styleUrls);
+  }
+
   const templatePaths: IComponentPath = {
     componentPath,
-    templateUrl: templateUrlInit?.text,
-    styleUrls: styleUrlsInint?.elements.map((element: ts.StringLiteral) => element.text)
+    templateUrl,
+    styleUrls,
+    componentUrls
   };
+
   return templatePaths;
 }
 
