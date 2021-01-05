@@ -3,6 +3,12 @@ import * as ts from 'typescript';
 import { Path } from '@angular-devkit/core';
 import { Rule, SchematicContext, Tree } from '@angular-devkit/schematics';
 
+interface IComponentPath {
+  componentPath: string;
+  templateUrl?: string;
+  styleUrls?: string[];
+}
+
 /**
  * Utility functions are not necessarily public facing and are therefore
  * subject to change at any time. This could lead to schematics breaking.
@@ -16,47 +22,110 @@ export function ariesVcr(_options: any): Rule {
     try {
 
       const tsPaths = buildPaths(tree, './src');
+      const componentPaths = tsPaths
+        .map(path => buildComponentPath(tree, path))
+        .filter(path => !!path) as IComponentPath[];
+      const sharedUrlRefs = getSharedUrlRefs(componentPaths);
 
-      for (const path of tsPaths) {
-        const content = readPath(tree, path);
-        if (!content) {
-          continue;
-        }
+      console.log(sharedUrlRefs);
 
-        const source = getSource(content);
-        if (!source) {
-          continue;
-        }
-
-        const decoratorNode: ts.Node | undefined = getDecorator(source);
-        // Likely not a component
-        if (!decoratorNode) {
-          continue;
-        }
-
-        const decoratorMetaDataNode: ts.Node = getDecoratorMetaData(source);
-        if (!decoratorMetaDataNode) {
-          continue;
-        }
-
-        const templateUrlNode = ast.getMetadataField(decoratorMetaDataNode as ts.ObjectLiteralExpression, 'templateUrl');
-        const styleUrlsNode = ast.getMetadataField(decoratorMetaDataNode as ts.ObjectLiteralExpression, 'styleUrls');
-
-        // Note: not all components will have `templateUrl` or `styleUrls` defined in the decorator
-
-        const templateUrl = ((templateUrlNode[0] as ts.PropertyAssignment).initializer as ts.StringLiteral).text;
-        const styleUrls = (((styleUrlsNode[0] as ts.PropertyAssignment).initializer) as ts.ArrayLiteralExpression).elements
-          .map((element: ts.StringLiteral) => element.text);
-
-        console.log(templateUrl);
-        console.log(styleUrls);
-      }
       return tree;
 
     } catch (error) {
       console.error(`Something went wrong: ${error}`);
     }
   };
+}
+
+function getSharedUrlRefs(componentPaths: IComponentPath[] = []): Set<string> {
+  const urlCounts = componentPaths
+    .reduce((refs, path) => {
+      if (path?.templateUrl) {
+        refs.push(path.templateUrl);
+      }
+      if (path?.styleUrls) {
+        refs.push(...path.styleUrls)
+      }
+      return refs;
+    }, [] as string[])
+    .reduce((counts: any, url: string) => {
+      return { ...counts, [url]: (counts[url] || 0) + 1 }
+    }, {} as { [url: string]: number });
+
+  return new Set<string>(Object.keys(urlCounts)
+    .filter(url => urlCounts[url] > 1));
+}
+
+/**
+ * 
+ * @param tree Tree
+ * @param path string
+ */
+function buildComponentPath(tree: Tree, path: string): IComponentPath | undefined {
+  const content = readPath(tree, path);
+  if (!content) {
+    return;
+  }
+
+  const source = getSource(content);
+  if (!source) {
+    return;
+  }
+
+  const decoratorNode = getDecorator(source);
+  // Likely not a component
+  if (!decoratorNode) {
+    return;
+  }
+
+  const decoratorMetaDataNode = getDecoratorMetaData(source);
+  if (!decoratorMetaDataNode) {
+    return;
+  }
+
+  return getComponentImportPath(decoratorMetaDataNode, path);
+}
+
+/**
+ * 
+ * @param decoratorMetaDataNode Node
+ * @param componentPath string
+ */
+function getComponentImportPath(decoratorMetaDataNode: ts.Node, componentPath: string): IComponentPath {
+  const templateUrlInit = getMetaDataValue<ts.StringLiteral>(
+    getMetaDataProperty(decoratorMetaDataNode, 'templateUrl'));
+  const styleUrlsInint = getMetaDataValue<ts.ArrayLiteralExpression>(
+    getMetaDataProperty(decoratorMetaDataNode, 'styleUrls'));
+
+  const templatePaths: IComponentPath = {
+    componentPath,
+    templateUrl: templateUrlInit?.text,
+    styleUrls: styleUrlsInint?.elements.map((element: ts.StringLiteral) => element.text)
+  };
+  return templatePaths;
+}
+
+/**
+ * 
+ * @param propertyAssignmentNode PropertyAssignment
+ */
+function getMetaDataValue<T>(propertyAssignmentNode?: ts.PropertyAssignment): T | undefined {
+  if (!propertyAssignmentNode) {
+    return;
+  }
+  return propertyAssignmentNode.initializer as unknown as T;
+}
+
+/**
+ * 
+ * @param decoratorMetaDataNode Node
+ * @param property string
+ */
+function getMetaDataProperty(decoratorMetaDataNode: ts.Node, property: string): ts.PropertyAssignment | undefined {
+  if (!property) {
+    return;
+  }
+  return ast.getMetadataField(decoratorMetaDataNode as ts.ObjectLiteralExpression, property)[0] as ts.PropertyAssignment;
 }
 
 /**
@@ -80,8 +149,8 @@ function getSource(content: string): ts.SourceFile {
  * @param source SourceFile
  */
 function getDecorator(source: ts.SourceFile): ts.Node | undefined {
-  const allNodes: ts.Node[] = ast.getSourceNodes(source);
-  const decoratorNode: ts.Node | undefined = allNodes.find((node: ts.Node) => ts.isDecorator(node));
+  const allNodes = ast.getSourceNodes(source);
+  const decoratorNode = allNodes.find((node: ts.Node) => ts.isDecorator(node));
   return decoratorNode;
 }
 
