@@ -30,24 +30,24 @@ const PATH_MATCH = '/themes/_active/';
 export function mergeTheme(_options: any): Rule {
   return (tree: Tree, _context: SchematicContext) => {
     try {
-      const cPaths = buildPaths(tree, './src')
-        .map(tsPath => buildComponentPath(tree, tsPath))
-        .filter(cPath => !!(cPath && cPath?.componentUrls.length)) as IComponentDescriptor[];
-      const sharedUrlRefs = getSharedUrlRefs(cPaths);
+      const cDescriptors = buildPaths(tree, './src')
+        .map(tsPath => buildComponentDescriptor(tree, tsPath))
+        .filter(cDescriptor => !!cDescriptor?.componentUrls.length) as IComponentDescriptor[];
+      const sharedUrlRefs = getSharedUrlRefs(cDescriptors);
 
       console.log(sharedUrlRefs);
 
       const merges = [];
-      for (const cPath of cPaths) {
-        const cPathObj = path.parse(cPath.componentPath);
-        for (const tUrl of cPath.componentUrls) {
-          const tPathObj = path.parse(tUrl.text);
-          const from = path.resolve(path.join(process.cwd(), cPathObj.dir, tPathObj.dir));
+      for (const cDescriptor of cDescriptors) {
+        const cPathObj = path.parse(cDescriptor.componentPath);
+        for (const descriptorUrl of cDescriptor.componentUrls) {
+          const dPathObj = path.parse(descriptorUrl.text);
+          const from = path.resolve(path.join(process.cwd(), cPathObj.dir, dPathObj.dir));
           const to = cPathObj.dir;
           const templateSource = apply(url(from), [
             filter(treePath => {
-              const treePathObj = path.parse(treePath);
-              return treePathObj.base === tPathObj.base;
+              const tPathObj = path.parse(treePath);
+              return tPathObj.base === dPathObj.base;
             }),
             move(to)
           ]);
@@ -65,12 +65,12 @@ export function mergeTheme(_options: any): Rule {
 
 /**
  * 
- * @param cPaths IComponentDescriptor[]
+ * @param cDescriptors IComponentDescriptor[]
  */
-function getSharedUrlRefs(cPaths: IComponentDescriptor[] = []): Set<string> {
-  const urlCounts = cPaths
-    .reduce((refs, cPath) => {
-      return refs.concat(cPath.componentUrls);
+function getSharedUrlRefs(cDescriptors: IComponentDescriptor[] = []): Set<string> {
+  const urlCounts = cDescriptors
+    .reduce((refs, cDescriptor) => {
+      return refs.concat(cDescriptor.componentUrls);
     }, [] as IComponentUrl[])
     .map(url => {
       // Some urls are deeply nested but reference shared active theme files
@@ -91,7 +91,7 @@ function getSharedUrlRefs(cPaths: IComponentDescriptor[] = []): Set<string> {
  * @param tree Tree
  * @param path string
  */
-function buildComponentPath(tree: Tree, path: string): IComponentDescriptor | undefined {
+function buildComponentDescriptor(tree: Tree, path: string): IComponentDescriptor | undefined {
   const content = readPath(tree, path);
   if (!content) {
     return;
