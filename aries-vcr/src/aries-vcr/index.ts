@@ -1,8 +1,14 @@
 import * as ts from 'typescript';
-// import * as path from 'path';
+import * as path from 'path';
 
 import { Path } from '@angular-devkit/core';
-import { Rule, SchematicContext, Tree } from '@angular-devkit/schematics';
+import { apply, move, url, Rule, SchematicContext, Tree, mergeWith, chain, MergeStrategy, filter } from '@angular-devkit/schematics';
+
+/**
+ * Utility functions are not necessarily public facing and are therefore
+ * subject to change at any time. This could lead to schematics breaking.
+ */
+import * as ast from '@schematics/angular/utility/ast-utils';
 
 interface IComponentPath {
   componentPath: string;
@@ -11,52 +17,63 @@ interface IComponentPath {
   componentUrls: string[];
 }
 
-/**
- * Utility functions are not necessarily public facing and are therefore
- * subject to change at any time. This could lead to schematics breaking.
- */
-import * as ast from '@schematics/angular/utility/ast-utils';
+const PATH_MATCH = '/themes/_active/';
 
 // You don't have to export the function as default. You can also have more than one rule factory
 // per file.
 export function ariesVcr(_options: any): Rule {
   return (tree: Tree, _context: SchematicContext) => {
     try {
+      const cPaths = buildPaths(tree, './src')
+        .map(tsPath => buildComponentPath(tree, tsPath))
+        .filter(cPath => !!(cPath && cPath?.componentUrls.length)) as IComponentPath[];
+      const sharedUrlRefs = getSharedUrlRefs(cPaths);
 
-      const tsPaths = buildPaths(tree, './src');
-      const componentPaths = tsPaths
-        .map(path => buildComponentPath(tree, path))
-        .filter(path => !!path) as IComponentPath[];
-      // const sharedUrlRefs = getSharedUrlRefs(componentPaths);
+      console.log(sharedUrlRefs);
 
-      console.log(componentPaths);
+      const merges = [];
+      for (const cPath of cPaths) {
+        const cPathObj = path.parse(cPath.componentPath);
+        for (const tUrl of cPath.componentUrls) {
+          const tPathObj = path.parse(tUrl);
+          const from = path.resolve(path.join(process.cwd(), cPathObj.dir, tPathObj.dir));
+          const to = cPathObj.dir;
+          merges.push(mergeWith(apply(url(from), [
+            filter(treePath => {
+              const treePathObj = path.parse(treePath);
+              return treePathObj.base === tPathObj.base;
+            }),
+            move(to)
+          ]), MergeStrategy.Overwrite));
+        }
+      }
 
-      return tree;
-
+      const rule = chain(merges);
+      return rule(tree, _context);
     } catch (error) {
       console.error(`Something went wrong: ${error}`);
     }
   };
 }
 
-// function getSharedUrlRefs(componentPaths: IComponentPath[] = []): Set<string> {
-//   const urlCounts = componentPaths
-//     .reduce((refs, path) => {
-//       if (path?.templateUrl) {
-//         refs.push(path.templateUrl);
-//       }
-//       if (path?.styleUrls) {
-//         refs.push(...path.styleUrls)
-//       }
-//       return refs;
-//     }, [] as string[])
-//     .reduce((counts: any, url: string) => {
-//       return { ...counts, [url]: (counts[url] || 0) + 1 }
-//     }, {} as { [url: string]: number });
+function getSharedUrlRefs(cPaths: IComponentPath[] = []): Set<string> {
+  const urlCounts = cPaths
+    .reduce((refs, cPath) => {
+      return refs.concat(cPath.componentUrls);
+    }, [] as string[])
+    .map(url => {
+      // Some urls are deeply nested but reference shared active theme files
+      const urlMatch = url.match(`${PATH_MATCH}(.*)`);
+      return urlMatch?.length && urlMatch[1];
+    })
+    .filter(url => !!url)
+    .reduce((counts: any, url: string) => {
+      return { ...counts, [url]: (counts[url] || 0) + 1 }
+    }, {} as { [url: string]: number });
 
-//   return new Set<string>(Object.keys(urlCounts)
-//     .filter(url => urlCounts[url] > 1));
-// }
+  return new Set<string>(Object.keys(urlCounts)
+    .filter(url => urlCounts[url] > 1));
+}
 
 /**
  * 
@@ -103,11 +120,12 @@ function getComponentImportPath(decoratorMetaDataNode: ts.Node, componentPath: s
   const styleUrls = styleUrlsInint?.elements.map((element: ts.StringLiteral) => element.text);
   const componentUrls: string[] = [];
 
-  if (templateUrl) {
+  // Skip over any urls that don't reference active theme files
+  if (templateUrl && templateUrl.includes(PATH_MATCH)) {
     componentUrls.push(templateUrl);
   }
   if (styleUrls) {
-    componentUrls.push(...styleUrls);
+    componentUrls.push(...styleUrls.filter(styleUrl => styleUrl.includes(PATH_MATCH)));
   }
 
   const templatePaths: IComponentPath = {
