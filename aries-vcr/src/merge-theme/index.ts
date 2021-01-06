@@ -9,12 +9,18 @@ import { apply, move, url, Rule, SchematicContext, Tree, mergeWith, chain, Merge
  * subject to change at any time. This could lead to schematics breaking.
  */
 import * as ast from '@schematics/angular/utility/ast-utils';
+// import * as change from '@schematics/angular/utility/change';
 
-interface IComponentPath {
+interface IComponentDescriptor {
   componentPath: string;
-  templateUrl?: string;
-  styleUrls?: string[];
-  componentUrls: string[];
+  templateUrl?: IComponentUrl;
+  styleUrls?: IComponentUrl[];
+  componentUrls: IComponentUrl[];
+}
+
+interface IComponentUrl {
+  text: string,
+  pos: number,
 }
 
 const PATH_MATCH = '/themes/_active/';
@@ -26,7 +32,7 @@ export function mergeTheme(_options: any): Rule {
     try {
       const cPaths = buildPaths(tree, './src')
         .map(tsPath => buildComponentPath(tree, tsPath))
-        .filter(cPath => !!(cPath && cPath?.componentUrls.length)) as IComponentPath[];
+        .filter(cPath => !!(cPath && cPath?.componentUrls.length)) as IComponentDescriptor[];
       const sharedUrlRefs = getSharedUrlRefs(cPaths);
 
       console.log(sharedUrlRefs);
@@ -35,16 +41,17 @@ export function mergeTheme(_options: any): Rule {
       for (const cPath of cPaths) {
         const cPathObj = path.parse(cPath.componentPath);
         for (const tUrl of cPath.componentUrls) {
-          const tPathObj = path.parse(tUrl);
+          const tPathObj = path.parse(tUrl.text);
           const from = path.resolve(path.join(process.cwd(), cPathObj.dir, tPathObj.dir));
           const to = cPathObj.dir;
-          merges.push(mergeWith(apply(url(from), [
+          const templateSource = apply(url(from), [
             filter(treePath => {
               const treePathObj = path.parse(treePath);
               return treePathObj.base === tPathObj.base;
             }),
             move(to)
-          ]), MergeStrategy.Overwrite));
+          ]);
+          merges.push(mergeWith(templateSource, MergeStrategy.Overwrite));
         }
       }
 
@@ -58,16 +65,16 @@ export function mergeTheme(_options: any): Rule {
 
 /**
  * 
- * @param cPaths IComponentPath[]
+ * @param cPaths IComponentDescriptor[]
  */
-function getSharedUrlRefs(cPaths: IComponentPath[] = []): Set<string> {
+function getSharedUrlRefs(cPaths: IComponentDescriptor[] = []): Set<string> {
   const urlCounts = cPaths
     .reduce((refs, cPath) => {
       return refs.concat(cPath.componentUrls);
-    }, [] as string[])
+    }, [] as IComponentUrl[])
     .map(url => {
       // Some urls are deeply nested but reference shared active theme files
-      const urlMatch = url.match(`${PATH_MATCH}(.*)`);
+      const urlMatch = url.text.match(`${PATH_MATCH}(.*)`);
       return urlMatch?.length && urlMatch[1];
     })
     .filter(url => !!url)
@@ -84,7 +91,7 @@ function getSharedUrlRefs(cPaths: IComponentPath[] = []): Set<string> {
  * @param tree Tree
  * @param path string
  */
-function buildComponentPath(tree: Tree, path: string): IComponentPath | undefined {
+function buildComponentPath(tree: Tree, path: string): IComponentDescriptor | undefined {
   const content = readPath(tree, path);
   if (!content) {
     return;
@@ -106,7 +113,7 @@ function buildComponentPath(tree: Tree, path: string): IComponentPath | undefine
     return;
   }
 
-  return getComponentImportPath(decoratorMetaDataNode, path);
+  return getComponentDescriptors(decoratorMetaDataNode, path);
 }
 
 /**
@@ -114,32 +121,33 @@ function buildComponentPath(tree: Tree, path: string): IComponentPath | undefine
  * @param decoratorMetaDataNode Node
  * @param componentPath string
  */
-function getComponentImportPath(decoratorMetaDataNode: ts.Node, componentPath: string): IComponentPath {
+function getComponentDescriptors(decoratorMetaDataNode: ts.Node, componentPath: string): IComponentDescriptor {
   const templateUrlInit = getMetaDataValue<ts.StringLiteral>(
     getMetaDataProperty(decoratorMetaDataNode, 'templateUrl'));
   const styleUrlsInint = getMetaDataValue<ts.ArrayLiteralExpression>(
     getMetaDataProperty(decoratorMetaDataNode, 'styleUrls'));
 
-  const templateUrl = templateUrlInit?.text;
-  const styleUrls = styleUrlsInint?.elements.map((element: ts.StringLiteral) => element.text);
-  const componentUrls: string[] = [];
+  const templateUrl = templateUrlInit && { text: templateUrlInit.text, pos: templateUrlInit.pos };
+  const styleUrls = styleUrlsInint?.elements
+    .map((element: ts.StringLiteral) => ({ text: element.text, pos: element.pos }));
+  const componentUrls: IComponentUrl[] = [];
 
   // Skip over any urls that don't reference active theme files
-  if (templateUrl && templateUrl.includes(PATH_MATCH)) {
+  if (templateUrl && templateUrl.text.includes(PATH_MATCH)) {
     componentUrls.push(templateUrl);
   }
   if (styleUrls) {
-    componentUrls.push(...styleUrls.filter(styleUrl => styleUrl.includes(PATH_MATCH)));
+    componentUrls.push(...styleUrls.filter(styleUrl => styleUrl.text.includes(PATH_MATCH)));
   }
 
-  const templatePaths: IComponentPath = {
+  const imports: IComponentDescriptor = {
     componentPath,
     templateUrl,
     styleUrls,
     componentUrls
   };
 
-  return templatePaths;
+  return imports;
 }
 
 /**
