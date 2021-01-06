@@ -21,7 +21,7 @@ const PATH_MATCH = '/themes/_active/';
 
 // You don't have to export the function as default. You can also have more than one rule factory
 // per file.
-export function ariesVcr(_options: any): Rule {
+export function mergeTheme(_options: any): Rule {
   return (tree: Tree, _context: SchematicContext) => {
     try {
       const cPaths = buildPaths(tree, './src')
@@ -56,6 +56,10 @@ export function ariesVcr(_options: any): Rule {
   };
 }
 
+/**
+ * 
+ * @param cPaths IComponentPath[]
+ */
 function getSharedUrlRefs(cPaths: IComponentPath[] = []): Set<string> {
   const urlCounts = cPaths
     .reduce((refs, cPath) => {

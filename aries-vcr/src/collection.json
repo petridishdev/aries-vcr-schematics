@@ -1,9 +1,9 @@
 {
   "$schema": "../node_modules/@angular-devkit/schematics/collection-schema.json",
   "schematics": {
-    "aries-vcr": {
+    "merge-theme": {
       "description": "A blank schematic.",
-      "factory": "./aries-vcr/index#ariesVcr"
+      "factory": "./merge-theme/index#mergeTheme"
     }
   }
 }
