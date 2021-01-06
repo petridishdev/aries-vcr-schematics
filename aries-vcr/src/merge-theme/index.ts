@@ -2,7 +2,7 @@ import * as ts from 'typescript';
 import * as path from 'path';
 
 import { Path } from '@angular-devkit/core';
-import { apply, move, url, Rule, SchematicContext, Tree, mergeWith, chain, MergeStrategy, filter } from '@angular-devkit/schematics';
+import { apply, move, url, Rule, SchematicContext, Tree, mergeWith, chain, MergeStrategy, filter, forEach } from '@angular-devkit/schematics';
 
 /**
  * Utility functions are not necessarily public facing and are therefore
@@ -10,6 +10,11 @@ import { apply, move, url, Rule, SchematicContext, Tree, mergeWith, chain, Merge
  */
 import * as ast from '@schematics/angular/utility/ast-utils';
 // import * as change from '@schematics/angular/utility/change';
+
+// interface IComponentDescriptorDiff {
+//   descriptor: IComponentDescriptor;
+//   modifications: IComponentUrl[];
+// }
 
 interface IComponentDescriptor {
   componentPath: string;
@@ -30,12 +35,15 @@ const PATH_MATCH = '/themes/_active/';
 export function mergeTheme(_options: any): Rule {
   return (tree: Tree, _context: SchematicContext) => {
     try {
+      // Get all descrptiors that reference urls.
+      // Skips components that use inline templates/styles
       const cDescriptors = buildPaths(tree, './src')
         .map(tsPath => buildComponentDescriptor(tree, tsPath))
         .filter(cDescriptor => !!cDescriptor?.componentUrls.length) as IComponentDescriptor[];
-      const sharedUrlRefs = getSharedUrlRefs(cDescriptors);
 
-      console.log(sharedUrlRefs);
+      const sharedReferences = getSharedReferences(cDescriptors);
+
+      console.log(sharedReferences);
 
       const merges = [];
       for (const cDescriptor of cDescriptors) {
@@ -49,7 +57,14 @@ export function mergeTheme(_options: any): Rule {
               const tPathObj = path.parse(treePath);
               return tPathObj.base === dPathObj.base;
             }),
-            move(to)
+            move(to),
+            forEach(file => {
+              // Handles the case where a file already exists in the same path as the component
+              if (tree.exists(file.path)) {
+                tree.overwrite(file.path, file.content);
+              }
+              return file;
+            }),
           ]);
           merges.push(mergeWith(templateSource, MergeStrategy.Overwrite));
         }
@@ -63,28 +78,11 @@ export function mergeTheme(_options: any): Rule {
   };
 }
 
-/**
- * 
- * @param cDescriptors IComponentDescriptor[]
- */
-function getSharedUrlRefs(cDescriptors: IComponentDescriptor[] = []): Set<string> {
-  const urlCounts = cDescriptors
-    .reduce((refs, cDescriptor) => {
-      return refs.concat(cDescriptor.componentUrls);
-    }, [] as IComponentUrl[])
-    .map(url => {
-      // Some urls are deeply nested but reference shared active theme files
-      const urlMatch = url.text.match(`${PATH_MATCH}(.*)`);
-      return urlMatch?.length && urlMatch[1];
-    })
-    .filter(url => !!url)
-    .reduce((counts: any, url: string) => {
-      return { ...counts, [url]: (counts[url] || 0) + 1 }
-    }, {} as { [url: string]: number });
+// Step 0. Ensure we're at the root of an angular application
 
-  return new Set<string>(Object.keys(urlCounts)
-    .filter(url => urlCounts[url] > 1));
-}
+// Step 1. Move shared references over
+
+// Step 2. Update component decorator references. If using a shared reference update accordingly 
 
 /**
  * 
@@ -132,12 +130,11 @@ function getComponentDescriptors(decoratorMetaDataNode: ts.Node, componentPath: 
     .map((element: ts.StringLiteral) => ({ text: element.text, pos: element.pos }));
   const componentUrls: IComponentUrl[] = [];
 
-  // Skip over any urls that don't reference active theme files
-  if (templateUrl && templateUrl.text.includes(PATH_MATCH)) {
+  if (templateUrl) {
     componentUrls.push(templateUrl);
   }
   if (styleUrls) {
-    componentUrls.push(...styleUrls.filter(styleUrl => styleUrl.text.includes(PATH_MATCH)));
+    componentUrls.push(...styleUrls);
   }
 
   const imports: IComponentDescriptor = {
@@ -152,33 +149,52 @@ function getComponentDescriptors(decoratorMetaDataNode: ts.Node, componentPath: 
 
 /**
  * 
- * @param propertyAssignmentNode PropertyAssignment
+ * @param cDescriptors IComponentDescriptor[]
  */
-function getMetaDataValue<T>(propertyAssignmentNode?: ts.PropertyAssignment): T | undefined {
-  if (!propertyAssignmentNode) {
-    return;
-  }
-  return propertyAssignmentNode.initializer as unknown as T;
+function getSharedReferences(cDescriptors: IComponentDescriptor[] = []): Set<string> {
+  const urlCounts = cDescriptors
+    .reduce((refs, cDescriptor) => {
+      return refs.concat(cDescriptor.componentUrls);
+    }, [] as IComponentUrl[])
+    .map(url => {
+      // Some urls are deeply nested but reference shared active theme files
+      const urlMatch = url.text.match(`${PATH_MATCH}(.*)`);
+      return urlMatch?.length && urlMatch[1];
+    })
+    .filter(url => !!url)
+    .reduce((counts: any, url: string) => {
+      return { ...counts, [url]: (counts[url] || 0) + 1 }
+    }, {} as { [url: string]: number });
+
+  return new Set<string>(Object.keys(urlCounts)
+    .filter(url => urlCounts[url] > 1));
 }
 
 /**
  * 
- * @param decoratorMetaDataNode Node
- * @param property string
+ * @param tree Tree
+ * @param source string
  */
-function getMetaDataProperty(decoratorMetaDataNode: ts.Node, property: string): ts.PropertyAssignment | undefined {
-  if (!property) {
-    return;
-  }
-  return ast.getMetadataField(decoratorMetaDataNode as ts.ObjectLiteralExpression, property)[0] as ts.PropertyAssignment;
+function buildPaths(tree: Tree, source: string = '.'): string[] {
+  const paths: string[] = [];
+  tree.getDir(source).visit((path: Path) => {
+    // Skip any files that aren't TypeScript and skip tests
+    if (path.includes('.ts') && !path.includes('.spec.ts')) {
+      paths.push(path);
+    }
+  });
+  return paths;
 }
 
 /**
  * 
- * @param source SourceFile
+ * @param tree Tree
+ * @param path string
  */
-function getDecoratorMetaData(source: ts.SourceFile): ts.Node {
-  return ast.getDecoratorMetadata(source, 'Component', '@angular/core')[0];
+function readPath(tree: Tree, path: string): string | undefined {
+  const tsBuffer = tree.read(path);
+  const content = tsBuffer?.toString('utf-8');
+  return content;
 }
 
 /**
@@ -201,27 +217,31 @@ function getDecorator(source: ts.SourceFile): ts.Node | undefined {
 
 /**
  * 
- * @param tree Tree
- * @param path string
+ * @param source SourceFile
  */
-function readPath(tree: Tree, path: string): string | undefined {
-  const tsBuffer = tree.read(path);
-  const content = tsBuffer?.toString('utf-8');
-  return content;
+function getDecoratorMetaData(source: ts.SourceFile): ts.Node {
+  return ast.getDecoratorMetadata(source, 'Component', '@angular/core')[0];
 }
 
 /**
  * 
- * @param tree Tree
- * @param source string
+ * @param decoratorMetaDataNode Node
+ * @param property string
  */
-function buildPaths(tree: Tree, source: string = '.'): string[] {
-  const paths: string[] = [];
-  tree.getDir(source).visit((path: Path) => {
-    // Skip any files that aren't TypeScript and skip tests
-    if (path.includes('.ts') && !path.includes('.spec.ts')) {
-      paths.push(path);
-    }
-  });
-  return paths;
+function getMetaDataProperty(decoratorMetaDataNode: ts.Node, property: string): ts.PropertyAssignment | undefined {
+  if (!property) {
+    return;
+  }
+  return ast.getMetadataField(decoratorMetaDataNode as ts.ObjectLiteralExpression, property)[0] as ts.PropertyAssignment;
+}
+
+/**
+ * 
+ * @param propertyAssignmentNode PropertyAssignment
+ */
+function getMetaDataValue<T>(propertyAssignmentNode?: ts.PropertyAssignment): T | undefined {
+  if (!propertyAssignmentNode) {
+    return;
+  }
+  return propertyAssignmentNode.initializer as unknown as T;
 }
