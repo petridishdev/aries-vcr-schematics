@@ -2,24 +2,21 @@ import * as ts from 'typescript';
 import * as path from 'path';
 
 import { Path } from '@angular-devkit/core';
-import { apply, move, url, Rule, SchematicContext, Tree, mergeWith, chain, MergeStrategy, filter, forEach } from '@angular-devkit/schematics';
+import { Rule, SchematicContext, Tree, chain } from '@angular-devkit/schematics';
 
 /**
  * Utility functions are not necessarily public facing and are therefore
  * subject to change at any time. This could lead to schematics breaking.
  */
 import * as ast from '@schematics/angular/utility/ast-utils';
-// import * as change from '@schematics/angular/utility/change';
-
-// interface IComponentDescriptorDiff {
-//   descriptor: IComponentDescriptor;
-//   modifications: IComponentUrl[];
-// }
+import * as change from '@schematics/angular/utility/change';
 
 interface IComponentDescriptor {
   componentPath: string;
   templateUrl?: IComponentUrl;
+  templateUrlPos?: number;
   styleUrls?: IComponentUrl[];
+  styleUrlsPos?: number;
   componentUrls: IComponentUrl[];
 }
 
@@ -46,40 +43,15 @@ export function mergeTheme(_options: any): Rule {
     try {
       // Get all descrptiors that reference urls.
       // Skips components that use inline templates/styles
-      const cDescriptors = buildPaths(tree, SRC_PATH)
+      const descriptors = buildPaths(tree, SRC_PATH)
         .map(tsPath => buildComponentDescriptor(tree, tsPath))
-        .filter(cDescriptor => !!cDescriptor?.componentUrls.length) as IComponentDescriptor[];
+        .filter(descriptor => !!descriptor?.componentUrls.length) as IComponentDescriptor[];
 
-      const sharedReferences = getSharedReferences(cDescriptors);
-
-      const merges = [];
-      for (const cDescriptor of cDescriptors) {
-        const cPathObj = path.parse(cDescriptor.componentPath);
-        for (const descriptorUrl of cDescriptor.componentUrls) {
-          const dPathObj = path.parse(descriptorUrl.text);
-          const from = path.resolve(path.join(process.cwd(), cPathObj.dir, dPathObj.dir));
-          const to = cPathObj.dir;
-          const templateSource = apply(url(from), [
-            filter(treePath => {
-              const tPathObj = path.parse(treePath);
-              return tPathObj.base === dPathObj.base;
-            }),
-            move(to),
-            forEach(file => {
-              // Handles the case where a file already exists in the same path as the component
-              if (tree.exists(file.path)) {
-                tree.overwrite(file.path, file.content);
-              }
-              return file;
-            }),
-          ]);
-          merges.push(mergeWith(templateSource, MergeStrategy.Overwrite));
-        }
-      }
+      const sharedReferences = getSharedReferences(descriptors);
 
       const rule = chain([
-        // ...merges,
-        moveShared(_options, sharedReferences)
+        moveShared(_options, sharedReferences),
+        moveTheme(_options, descriptors, sharedReferences)
       ]);
       return rule(tree, _context);
     } catch (error) {
@@ -96,22 +68,86 @@ export function moveShared(_options: any, shared: ISharedComponentUrl[]): Rule {
     shared
       .filter(url => path.parse(url.formatted).ext === '.scss')
       .map(url => {
-        const buffer = tree.read(path.join(SRC_PATH, ACTIVE_THEMES_PATH, url.formatted));
-        return {
-          text: url.formatted,
-          content: buffer?.toString('utf-8')
-        };
+        const content = readPath(tree, path.join(SRC_PATH, ACTIVE_THEMES_PATH, url.formatted));
+        return { text: url.formatted, content };
       })
       .filter(url => url.content !== undefined)
       .forEach(url => {
-        tree.create(path.join(SHARED_STYLES_PATH, url.text), url.content as string);
+        const sharedPath = path.join(SHARED_STYLES_PATH, url.text);
+        const sharedContent = url.content as string;
+
+        if (!tree.exists(sharedPath)) {
+          tree.create(sharedPath, sharedContent);
+        } else {
+          tree.overwrite(sharedPath, sharedContent);
+        }
       });
 
     return tree;
   };
 }
 
-// Step 2. Update component decorator references. If using a shared reference update accordingly 
+export function moveTheme(_options: any, descriptors: IComponentDescriptor[], shared: ISharedComponentUrl[]): Rule {
+  return (tree: Tree, _context: SchematicContext) => {
+    for (const descriptor of descriptors) {
+      const componentDir = path.parse(descriptor.componentPath).dir;
+      for (const descriptorUrl of descriptor.componentUrls) {
+        const descriptorPath = path.parse(descriptorUrl.text);
+        const descriptorDir = descriptorPath.dir;
+        const descriptorBase = descriptorPath.base;
+        const { from, to } = getCopyPaths(descriptorDir, componentDir, descriptorBase);
+
+        const isShared = shared.find(url => url.text.has(descriptorUrl.text));
+        if (isShared) {
+          const sharedPath = path.join(SHARED_STYLES_PATH, isShared.formatted);
+          updateComponentImport(tree, descriptor.componentPath, descriptorUrl.pos, descriptorUrl.text, sharedPath);
+          continue;
+        }
+
+        const content = readPath(tree, from);
+        if (!content) {
+          continue;
+        }
+
+        if (!tree.exists(to)) {
+          tree.create(to, content);
+        } else {
+          tree.overwrite(to, content);
+        }
+
+        updateComponentImport(tree, descriptor.componentPath, descriptorUrl.pos, descriptorUrl.text, to);
+      }
+    }
+
+    return tree;
+  }
+}
+
+/**
+ * 
+ * @param tree Tree
+ * @param componentPath string
+ * @param pos number
+ * @param oldText string
+ * @param newText string
+ */
+function updateComponentImport(tree: Tree, componentPath: string, pos: number, oldText: string, newText: string) {
+  const updateRecorder = tree.beginUpdate(componentPath);
+  const update = new change.ReplaceChange(componentPath, pos, oldText, newText);
+  change.applyToUpdateRecorder(updateRecorder, [update]);
+  tree.commitUpdate(updateRecorder);
+}
+
+/**
+ * 
+ * @param componentDir string
+ * @param descriptorPath string
+ */
+function getCopyPaths(descriptorDir: string, componentDir: string, file: string) {
+  const from = path.join(componentDir, descriptorDir, file);
+  const to = path.join(componentDir, file);
+  return { from, to };
+}
 
 /**
  * 
