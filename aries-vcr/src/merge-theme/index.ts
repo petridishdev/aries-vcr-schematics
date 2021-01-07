@@ -28,7 +28,16 @@ interface IComponentUrl {
   pos: number,
 }
 
-const PATH_MATCH = '/themes/_active/';
+interface ISharedComponentUrl {
+  text: Set<string>;
+  formatted: string;
+}
+
+const SRC_PATH = './src';
+const ACTIVE_THEMES_PATH = 'themes/_active';
+const APP_MODULE_PATH = path.join(SRC_PATH, 'app');
+const SHARED_MODULE_PATH = path.join(APP_MODULE_PATH, 'shared');
+const SHARED_STYLES_PATH = path.join(SHARED_MODULE_PATH, 'styles');
 
 // You don't have to export the function as default. You can also have more than one rule factory
 // per file.
@@ -37,13 +46,11 @@ export function mergeTheme(_options: any): Rule {
     try {
       // Get all descrptiors that reference urls.
       // Skips components that use inline templates/styles
-      const cDescriptors = buildPaths(tree, './src')
+      const cDescriptors = buildPaths(tree, SRC_PATH)
         .map(tsPath => buildComponentDescriptor(tree, tsPath))
         .filter(cDescriptor => !!cDescriptor?.componentUrls.length) as IComponentDescriptor[];
 
       const sharedReferences = getSharedReferences(cDescriptors);
-
-      console.log(sharedReferences);
 
       const merges = [];
       for (const cDescriptor of cDescriptors) {
@@ -70,17 +77,39 @@ export function mergeTheme(_options: any): Rule {
         }
       }
 
-      const rule = chain(merges);
+      const rule = chain([
+        // ...merges,
+        moveShared(_options, sharedReferences)
+      ]);
       return rule(tree, _context);
     } catch (error) {
-      console.error(`Something went wrong: ${error}`);
+      console.error(`Something went wrong:`);
+      console.error(error);
     }
   };
 }
 
 // Step 0. Ensure we're at the root of an angular application
 
-// Step 1. Move shared references over
+export function moveShared(_options: any, shared: ISharedComponentUrl[]): Rule {
+  return (tree: Tree, _context: SchematicContext) => {
+    shared
+      .filter(url => path.parse(url.formatted).ext === '.scss')
+      .map(url => {
+        const buffer = tree.read(path.join(SRC_PATH, ACTIVE_THEMES_PATH, url.formatted));
+        return {
+          text: url.formatted,
+          content: buffer?.toString('utf-8')
+        };
+      })
+      .filter(url => url.content !== undefined)
+      .forEach(url => {
+        tree.create(path.join(SHARED_STYLES_PATH, url.text), url.content as string);
+      });
+
+    return tree;
+  };
+}
 
 // Step 2. Update component decorator references. If using a shared reference update accordingly 
 
@@ -149,25 +178,50 @@ function getComponentDescriptors(decoratorMetaDataNode: ts.Node, componentPath: 
 
 /**
  * 
- * @param cDescriptors IComponentDescriptor[]
+ * @param descriptors IComponentDescriptor[]
  */
-function getSharedReferences(cDescriptors: IComponentDescriptor[] = []): Set<string> {
-  const urlCounts = cDescriptors
-    .reduce((refs, cDescriptor) => {
-      return refs.concat(cDescriptor.componentUrls);
-    }, [] as IComponentUrl[])
-    .map(url => {
-      // Some urls are deeply nested but reference shared active theme files
-      const urlMatch = url.text.match(`${PATH_MATCH}(.*)`);
-      return urlMatch?.length && urlMatch[1];
-    })
-    .filter(url => !!url)
-    .reduce((counts: any, url: string) => {
-      return { ...counts, [url]: (counts[url] || 0) + 1 }
-    }, {} as { [url: string]: number });
+function getSharedReferences(descriptors: IComponentDescriptor[] = []): ISharedComponentUrl[] {
+  const allUrls = flattenComponentUrls(descriptors);
 
-  return new Set<string>(Object.keys(urlCounts)
-    .filter(url => urlCounts[url] > 1));
+  const processedUrls = allUrls
+    .map(url => {
+      const urlMatch = url.text.match(`\/${ACTIVE_THEMES_PATH}\/(.*)`);
+      return {
+        text: url.text,
+        formatted: urlMatch?.length && urlMatch[1] || ''
+      };
+    })
+    .filter(url => !!url.formatted);
+
+  const urlCounts = processedUrls
+    .reduce((counts, url) => {
+      let _count = counts[url.formatted];
+      if (!_count) {
+        _count = {
+          text: new Set<string>(),
+          formatted: url.formatted,
+          count: 0
+        }
+      }
+      _count.text.add(url.text);
+      _count.count += 1;
+      counts[_count.formatted] = _count;
+      return counts;
+    }, <any>{});
+
+  return (Object.values(urlCounts) as any[])
+    .filter(url => url.count > 1) as ISharedComponentUrl[];
+}
+
+/**
+ * 
+ * @param descriptors IComponentDescriptor[]
+ */
+function flattenComponentUrls(descriptors: IComponentDescriptor[]) {
+  return descriptors
+    .reduce((refs, descriptors) => {
+      return refs.concat(descriptors.componentUrls);
+    }, [] as IComponentUrl[]);
 }
 
 /**
