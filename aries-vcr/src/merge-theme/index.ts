@@ -9,7 +9,7 @@ import { Rule, SchematicContext, Tree, chain } from '@angular-devkit/schematics'
  * subject to change at any time. This could lead to schematics breaking.
  */
 import * as ast from '@schematics/angular/utility/ast-utils';
-import * as change from '@schematics/angular/utility/change';
+// import * as change from '@schematics/angular/utility/change';
 
 interface IComponentDescriptor {
   componentPath: string;
@@ -99,8 +99,8 @@ export function moveTheme(_options: any, descriptors: IComponentDescriptor[], sh
 
         const isShared = shared.find(url => url.text.has(descriptorUrl.text));
         if (isShared) {
-          const sharedPath = path.join(SHARED_STYLES_PATH, isShared.formatted);
-          updateComponentImport(tree, descriptor.componentPath, descriptorUrl.pos, descriptorUrl.text, sharedPath);
+          // const sharedPath = path.join(SHARED_STYLES_PATH, isShared.formatted);
+          // updateComponentImport(tree, descriptor.componentPath, descriptorUrl.pos, descriptorUrl.text, sharedPath);
           continue;
         }
 
@@ -115,7 +115,7 @@ export function moveTheme(_options: any, descriptors: IComponentDescriptor[], sh
           tree.overwrite(to, content);
         }
 
-        updateComponentImport(tree, descriptor.componentPath, descriptorUrl.pos, descriptorUrl.text, to);
+        // updateComponentImport(tree, descriptor.componentPath, descriptorUrl.pos, descriptorUrl.text, to);
       }
     }
 
@@ -123,20 +123,20 @@ export function moveTheme(_options: any, descriptors: IComponentDescriptor[], sh
   }
 }
 
-/**
- * 
- * @param tree Tree
- * @param componentPath string
- * @param pos number
- * @param oldText string
- * @param newText string
- */
-function updateComponentImport(tree: Tree, componentPath: string, pos: number, oldText: string, newText: string) {
-  const updateRecorder = tree.beginUpdate(componentPath);
-  const update = new change.ReplaceChange(componentPath, pos, oldText, newText);
-  change.applyToUpdateRecorder(updateRecorder, [update]);
-  tree.commitUpdate(updateRecorder);
-}
+// /**
+//  * 
+//  * @param tree Tree
+//  * @param componentPath string
+//  * @param pos number
+//  * @param oldText string
+//  * @param newText string
+//  */
+// function updateComponentImport(tree: Tree, componentPath: string, pos: number, oldText: string, newText: string) {
+//   const updateRecorder = tree.beginUpdate(componentPath);
+//   const update = new change.ReplaceChange(componentPath, pos, oldText, newText);
+//   change.applyToUpdateRecorder(updateRecorder, [update]);
+//   tree.commitUpdate(updateRecorder);
+// }
 
 /**
  * 
@@ -291,8 +291,8 @@ function readPath(tree: Tree, path: string): string | undefined {
  * 
  * @param content string
  */
-function getSource(content: string): ts.SourceFile {
-  return ts.createSourceFile('node.ts', content, ts.ScriptTarget.Latest, true);
+function getSource(content: string, filepath: string = 'node.ts'): ts.SourceFile {
+  return ts.createSourceFile(filepath, content, ts.ScriptTarget.Latest, true);
 }
 
 /**
