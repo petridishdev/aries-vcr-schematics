@@ -34,6 +34,10 @@ const ACTIVE_THEMES_PATH = 'themes/_active';
 const ACTIVE_THEMES_PREFIX = '(\\.*\/*)*themes\/_active\/';
 const ACTIVE_THEMES_SUFFIX = '.*\/(.*\\..*)';
 const APP_MODULE_PATH = path.join(SRC_PATH, 'app');
+const SRC_STYLES_PATH = path.join(SRC_PATH, 'styles');
+const SRC_ASSETS_PATH = path.join(SRC_PATH, 'assets');
+const SRC_ACTIVE_THEMES_PATH = path.join(SRC_PATH, ACTIVE_THEMES_PATH);
+const SRC_ACTIVE_THEMES_ASSETS_PATH = path.join(SRC_ACTIVE_THEMES_PATH, 'assets');
 const SHARED_MODULE_PATH = path.join(APP_MODULE_PATH, 'shared');
 const SHARED_STYLES_PATH = path.join(SHARED_MODULE_PATH, 'styles');
 
@@ -53,7 +57,8 @@ export function mergeTheme(_options: any): Rule {
       const rule = chain([
         moveShared(_options, sharedReferences),
         moveTheme(_options, descriptors, sharedReferences),
-        updateThemeImports(_options, descriptors, sharedReferences)
+        updateThemeImports(_options, descriptors, sharedReferences),
+        moveIndex(_options)
       ]);
       return rule(tree, _context);
     } catch (error) {
@@ -77,12 +82,7 @@ export function moveShared(_options: any, shared: ISharedComponentUrl[]): Rule {
       .forEach(url => {
         const sharedPath = path.join(SHARED_STYLES_PATH, url.text);
         const sharedContent = url.content as string;
-
-        if (!tree.exists(sharedPath)) {
-          tree.create(sharedPath, sharedContent);
-        } else {
-          tree.overwrite(sharedPath, sharedContent);
-        }
+        writeToTree(tree, sharedPath, sharedContent);
       });
 
     return tree;
@@ -106,16 +106,63 @@ export function moveTheme(_options: any, descriptors: IComponentDescriptor[], sh
         if (!content) {
           continue;
         }
-
-        if (!tree.exists(to)) {
-          tree.create(to, content);
-        } else {
-          tree.overwrite(to, content);
-        }
+        writeToTree(tree, to, content);
       }
     }
 
     return tree;
+  }
+}
+
+export function moveIndex(_options: any) {
+  return (tree: Tree, _context: SchematicContext) => {
+    const indexDir = tree.getDir(SRC_ACTIVE_THEMES_PATH);
+    const assetsDir = tree.getDir(SRC_ACTIVE_THEMES_ASSETS_PATH);
+
+    // Move index files
+    indexDir.subfiles
+      .filter(file => !path.parse(file).ext.match('\\.(s?c)ss'))
+      .map(file => ({ file, content: readPath(tree, path.join(indexDir.path, file)) }))
+      .filter(fileContent => !!fileContent.content)
+      .forEach(fileContent => {
+        const to = path.join(SRC_PATH, fileContent.file);
+        writeToTree(tree, to, fileContent.content as string);
+      });
+
+    // Move global styles
+    indexDir.subfiles
+      .filter(file => path.parse(file).ext.match('\\.(s?c)ss'))
+      .map(file => ({ file, content: readPath(tree, path.join(indexDir.path, file)) }))
+      .filter(fileContent => !!fileContent.content)
+      .forEach(fileContent => {
+        const to = path.join(SRC_STYLES_PATH, fileContent.file);
+        writeToTree(tree, to, fileContent.content as string);
+      });
+
+    // Move assets
+    assetsDir.subfiles
+      .map(file => ({ file, content: readPath(tree, path.join(assetsDir.path, file)) }))
+      .filter(fileContent => !!fileContent.content)
+      .forEach(fileContent => {
+        const to = path.join(SRC_ASSETS_PATH, fileContent.file);
+        writeToTree(tree, to, fileContent.content as string);
+      });
+
+    return tree;
+  };
+}
+
+/**
+ * 
+ * @param tree Tree
+ * @param to string
+ * @param content string
+ */
+function writeToTree(tree: Tree, to: string, content: string) {
+  if (!tree.exists(to)) {
+    tree.create(to, content as string);
+  } else {
+    tree.overwrite(to, content as string);
   }
 }
 
@@ -148,12 +195,7 @@ export function updateThemeImports(_options: any, descriptors: IComponentDescrip
       if (!content) {
         continue;
       }
-
-      if (!tree.exists(componentPath)) {
-        tree.create(componentPath, content);
-      } else {
-        tree.overwrite(componentPath, content);
-      }
+      writeToTree(tree, componentPath, content);
     }
 
     return tree;
