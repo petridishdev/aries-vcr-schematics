@@ -31,8 +31,8 @@ interface ISharedComponentUrl {
 
 const SRC_PATH = './src';
 const ACTIVE_THEMES_PATH = 'themes/_active';
-const ACTIVE_THEMES_PREFIX = '(\\.*\/*)*themes\/_active\/';
-const ACTIVE_THEMES_SUFFIX = '.*\/(.*\\..*)';
+const ACTIVE_THEMES_PREFIX = '(\\.*/*)*themes/_active/';
+const ACTIVE_THEMES_SUFFIX = '.*/(.*\\..*)';
 const APP_MODULE_PATH = path.join(SRC_PATH, 'app');
 const SRC_STYLES_PATH = path.join(SRC_PATH, 'styles');
 const SRC_ASSETS_PATH = path.join(SRC_PATH, 'assets');
@@ -301,7 +301,7 @@ function getSharedReferences(descriptors: IComponentDescriptor[] = []): ISharedC
 
   const processedUrls = allUrls
     .map(url => {
-      const urlMatch = url.text.match(`\/${ACTIVE_THEMES_PATH}\/(.*)`);
+      const urlMatch = url.text.match(`/${ACTIVE_THEMES_PATH}/(.*)`);
       return {
         text: url.text,
         formatted: urlMatch?.length && urlMatch[1] || ''
@@ -345,7 +345,7 @@ function flattenComponentUrls(descriptors: IComponentDescriptor[]) {
  * @param tree Tree
  * @param source string
  */
-function buildPaths(tree: Tree, source: string = '.'): string[] {
+function buildPaths(tree: Tree, source = '.'): string[] {
   const paths: string[] = [];
   tree.getDir(source).visit((path: Path) => {
     // Skip any files that aren't TypeScript and skip tests
@@ -371,7 +371,7 @@ function readPath(tree: Tree, path: string): string | undefined {
  * 
  * @param content string
  */
-function getSource(content: string, filepath: string = 'node.ts'): ts.SourceFile {
+function getSource(content: string, filepath = 'node.ts'): ts.SourceFile {
   return ts.createSourceFile(filepath, content, ts.ScriptTarget.Latest, true);
 }
 
