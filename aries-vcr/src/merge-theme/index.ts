@@ -21,8 +21,7 @@ interface IComponentDescriptor {
 }
 
 interface IComponentUrl {
-  text: string,
-  pos: number,
+  text: string
 }
 
 interface ISharedComponentUrl {
@@ -32,6 +31,8 @@ interface ISharedComponentUrl {
 
 const SRC_PATH = './src';
 const ACTIVE_THEMES_PATH = 'themes/_active';
+const ACTIVE_THEMES_PREFIX = '(\\.*\/*)*themes\/_active\/';
+const ACTIVE_THEMES_SUFFIX = '.*\/(.*\\..*)';
 const APP_MODULE_PATH = path.join(SRC_PATH, 'app');
 const SHARED_MODULE_PATH = path.join(APP_MODULE_PATH, 'shared');
 const SHARED_STYLES_PATH = path.join(SHARED_MODULE_PATH, 'styles');
@@ -51,7 +52,8 @@ export function mergeTheme(_options: any): Rule {
 
       const rule = chain([
         moveShared(_options, sharedReferences),
-        moveTheme(_options, descriptors, sharedReferences)
+        moveTheme(_options, descriptors, sharedReferences),
+        updateThemeImports(_options, descriptors, sharedReferences)
       ]);
       return rule(tree, _context);
     } catch (error) {
@@ -66,7 +68,7 @@ export function mergeTheme(_options: any): Rule {
 export function moveShared(_options: any, shared: ISharedComponentUrl[]): Rule {
   return (tree: Tree, _context: SchematicContext) => {
     shared
-      .filter(url => path.parse(url.formatted).ext === '.scss')
+      .filter(url => path.parse(url.formatted).ext.match('\\.(s?c)ss'))
       .map(url => {
         const content = readPath(tree, path.join(SRC_PATH, ACTIVE_THEMES_PATH, url.formatted));
         return { text: url.formatted, content };
@@ -92,15 +94,11 @@ export function moveTheme(_options: any, descriptors: IComponentDescriptor[], sh
     for (const descriptor of descriptors) {
       const componentDir = path.parse(descriptor.componentPath).dir;
       for (const descriptorUrl of descriptor.componentUrls) {
-        const descriptorPath = path.parse(descriptorUrl.text);
-        const descriptorDir = descriptorPath.dir;
-        const descriptorBase = descriptorPath.base;
-        const { from, to } = getCopyPaths(descriptorDir, componentDir, descriptorBase);
+        const { descriptorDir, descriptorBase } = urlPath(descriptorUrl);
+        const { from, to } = srcDestPath(descriptorDir, componentDir, descriptorBase);
 
         const isShared = shared.find(url => url.text.has(descriptorUrl.text));
         if (isShared) {
-          // const sharedPath = path.join(SHARED_STYLES_PATH, isShared.formatted);
-          // updateComponentImport(tree, descriptor.componentPath, descriptorUrl.pos, descriptorUrl.text, sharedPath);
           continue;
         }
 
@@ -114,8 +112,47 @@ export function moveTheme(_options: any, descriptors: IComponentDescriptor[], sh
         } else {
           tree.overwrite(to, content);
         }
+      }
+    }
 
-        // updateComponentImport(tree, descriptor.componentPath, descriptorUrl.pos, descriptorUrl.text, to);
+    return tree;
+  }
+}
+
+/**
+ * 
+ * @param descriptorUrl IComponentUrl
+ */
+function urlPath(descriptorUrl: IComponentUrl) {
+  const descriptorPath = path.parse(descriptorUrl.text);
+  const descriptorDir = descriptorPath.dir;
+  const descriptorBase = descriptorPath.base;
+  return { descriptorDir, descriptorBase };
+}
+
+// Not the most ideal approach to use Regex
+export function updateThemeImports(_options: any, descriptors: IComponentDescriptor[], shared: ISharedComponentUrl[]): Rule {
+  return (tree: Tree, _context: SchematicContext) => {
+    for (const descriptor of descriptors) {
+      const componentPath = descriptor.componentPath;
+      const componentDir = path.parse(componentPath).dir;
+      let content = readPath(tree, componentPath);
+      shared.forEach(url => {
+        const relativePath = path.relative(componentDir, `/${APP_MODULE_PATH}`);
+        const sharedRegex = new RegExp(`('|")${ACTIVE_THEMES_PREFIX}${url.formatted}('|")`);
+        content = content?.replace(sharedRegex, `'${relativePath}/shared/styles/${url.formatted}'`);
+      });
+      const regex = new RegExp(`('|")${ACTIVE_THEMES_PREFIX}${ACTIVE_THEMES_SUFFIX}('|")`, 'g');
+      content = content?.replace(regex, `'./$3'`);
+
+      if (!content) {
+        continue;
+      }
+
+      if (!tree.exists(componentPath)) {
+        tree.create(componentPath, content);
+      } else {
+        tree.overwrite(componentPath, content);
       }
     }
 
@@ -142,8 +179,9 @@ export function moveTheme(_options: any, descriptors: IComponentDescriptor[], sh
  * 
  * @param componentDir string
  * @param descriptorPath string
+ * @param file string
  */
-function getCopyPaths(descriptorDir: string, componentDir: string, file: string) {
+function srcDestPath(descriptorDir: string, componentDir: string, file: string) {
   const from = path.join(componentDir, descriptorDir, file);
   const to = path.join(componentDir, file);
   return { from, to };
@@ -190,9 +228,9 @@ function getComponentDescriptors(decoratorMetaDataNode: ts.Node, componentPath: 
   const styleUrlsInint = getMetaDataValue<ts.ArrayLiteralExpression>(
     getMetaDataProperty(decoratorMetaDataNode, 'styleUrls'));
 
-  const templateUrl = templateUrlInit && { text: templateUrlInit.text, pos: templateUrlInit.pos };
+  const templateUrl = templateUrlInit && { text: templateUrlInit.text };
   const styleUrls = styleUrlsInint?.elements
-    .map((element: ts.StringLiteral) => ({ text: element.text, pos: element.pos }));
+    .map((element: ts.StringLiteral) => ({ text: element.text }));
   const componentUrls: IComponentUrl[] = [];
 
   if (templateUrl) {
