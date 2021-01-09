@@ -103,7 +103,7 @@ export function moveTheme(_options: any, descriptors: IComponentDescriptor[], sh
         }
 
         const content = readPath(tree, from);
-        if (!content) {
+        if (content === undefined) {
           continue;
         }
         writeToTree(tree, to, content);
@@ -123,7 +123,7 @@ export function moveIndex(_options: any) {
     indexDir.subfiles
       .filter(file => !path.parse(file).ext.match('\\.(s?c)ss'))
       .map(file => ({ file, content: readPath(tree, path.join(indexDir.path, file)) }))
-      .filter(fileContent => !!fileContent.content)
+      .filter(fileContent => fileContent.content !== undefined)
       .forEach(fileContent => {
         const to = path.join(SRC_PATH, fileContent.file);
         writeToTree(tree, to, fileContent.content as string);
@@ -133,7 +133,7 @@ export function moveIndex(_options: any) {
     indexDir.subfiles
       .filter(file => path.parse(file).ext.match('\\.(s?c)ss'))
       .map(file => ({ file, content: readPath(tree, path.join(indexDir.path, file)) }))
-      .filter(fileContent => !!fileContent.content)
+      .filter(fileContent => fileContent.content !== undefined)
       .forEach(fileContent => {
         const to = path.join(SRC_STYLES_PATH, fileContent.file);
         writeToTree(tree, to, fileContent.content as string);
@@ -142,7 +142,7 @@ export function moveIndex(_options: any) {
     // Move assets
     assetsDir.subfiles
       .map(file => ({ file, content: readPath(tree, path.join(assetsDir.path, file)) }))
-      .filter(fileContent => !!fileContent.content)
+      .filter(fileContent => fileContent.content !== undefined)
       .forEach(fileContent => {
         const to = path.join(SRC_ASSETS_PATH, fileContent.file);
         writeToTree(tree, to, fileContent.content as string);
@@ -192,7 +192,7 @@ export function updateThemeImports(_options: any, descriptors: IComponentDescrip
       const regex = new RegExp(`('|")${ACTIVE_THEMES_PREFIX}${ACTIVE_THEMES_SUFFIX}('|")`, 'g');
       content = content?.replace(regex, `'./$3'`);
 
-      if (!content) {
+      if (content === undefined) {
         continue;
       }
       writeToTree(tree, componentPath, content);
