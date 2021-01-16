@@ -2,7 +2,7 @@ import * as ts from 'typescript';
 import * as path from 'path';
 
 import { Path } from '@angular-devkit/core';
-import { Rule, SchematicContext, Tree, chain } from '@angular-devkit/schematics';
+import { Rule, SchematicContext, Tree, chain, SchematicsException } from '@angular-devkit/schematics';
 
 /**
  * Utility functions are not necessarily public facing and are therefore
@@ -10,6 +10,8 @@ import { Rule, SchematicContext, Tree, chain } from '@angular-devkit/schematics'
  */
 import * as ast from '@schematics/angular/utility/ast-utils';
 // import * as change from '@schematics/angular/utility/change';
+import * as config from '@schematics/angular/utility/config';
+import * as models from '@schematics/angular/utility/workspace-models';
 
 interface IComponentDescriptor {
   componentPath: string;
@@ -55,10 +57,12 @@ export function mergeTheme(_options: any): Rule {
       const sharedReferences = getSharedReferences(descriptors);
 
       const rule = chain([
+        checkRootAngularProject(_options),
         moveShared(_options, sharedReferences),
         moveTheme(_options, descriptors, sharedReferences),
         updateThemeImports(_options, descriptors, sharedReferences),
-        moveIndex(_options)
+        moveIndex(_options),
+        updateAngularProject(_options),
       ]);
       return rule(tree, _context);
     } catch (error) {
@@ -68,7 +72,15 @@ export function mergeTheme(_options: any): Rule {
   };
 }
 
-// Step 0. Ensure we're at the root of an angular application
+export function checkRootAngularProject(_options: any): Rule {
+  return (tree: Tree, _context: SchematicContext) => {
+    const angularConfig = 'angular.json';
+    if (!tree.exists(angularConfig)) {
+      throw new SchematicsException('Not in a valid Angular workspace');
+    }
+    return tree;
+  }
+}
 
 export function moveShared(_options: any, shared: ISharedComponentUrl[]): Rule {
   return (tree: Tree, _context: SchematicContext) => {
@@ -150,6 +162,53 @@ export function moveIndex(_options: any) {
 
     return tree;
   };
+}
+
+export function updateAngularProject(_options: any): Rule {
+  return (tree: Tree, _context: SchematicContext) => {
+    const angularConfig = 'angular.json';
+    if (!tree.exists(angularConfig)) {
+      throw new SchematicsException('Not in a valid Angular workspace');
+    }
+
+    const workspaceConfig: models.WorkspaceSchema = config.getWorkspace(tree);
+    const projects = workspaceConfig.projects;
+    for (const project in projects) {
+      if (Object.prototype.hasOwnProperty.call(projects, project)) {
+        const projectConfig = projects[project];
+        const architect = projectConfig.architect;
+        const buildpotions: any = architect?.build?.options;
+        const testOptions: any = architect?.test?.options;
+        updateOptions(buildpotions, projects, project, projectConfig);
+        updateOptions(testOptions, projects, project, projectConfig);
+      }
+    }
+    writeToTree(tree, angularConfig, JSON.stringify(workspaceConfig, null, 2));
+    return tree;
+  }
+
+  function updateOptions(options: any, projects: { [key: string]: models.WorkspaceProject<models.ProjectType>; }, project: string, projectConfig: models.WorkspaceProject<models.ProjectType>) {
+    if (options?.index) {
+      options.index = options.index.replace(`/${ACTIVE_THEMES_PATH}`, '');
+    }
+    if (options?.stylePreprocessorOptions?.includePaths) {
+      const idx = options.stylePreprocessorOptions.includePaths.indexOf(SRC_ACTIVE_THEMES_PATH);
+      options.stylePreprocessorOptions.includePaths.splice(idx, 1);
+    }
+    if (options?.assets) {
+      options.assets = options.assets.map((asset: any) => {
+        asset.input = asset.input.replace(`/${ACTIVE_THEMES_PATH}`, '');
+        return asset;
+      });
+    }
+    if (options?.styles) {
+      options.styles = options.styles.map((style: any) => {
+        style = style.replace(`/${ACTIVE_THEMES_PATH}`, '/styles');
+        return style;
+      });
+    }
+    projects[project] = projectConfig;
+  }
 }
 
 /**
