@@ -168,6 +168,26 @@ export function moveIndex(_options: any) {
         writeToTree(tree, to, fileContent.content as string);
       });
 
+    deepCopyDir(SRC_ACTIVE_THEMES_ASSETS_PATH, 'assets');
+
+    function deepCopyDir(dirPath: string, dirName: string) {
+      const dir = tree.getDir(dirPath);
+
+      // Copy files over
+      dir.subfiles
+        .map(file => ({ file, content: readPath(tree, path.join(dir.path, file)) }))
+        .filter(fileContent => fileContent.content !== undefined)
+        .forEach(fileContent => {
+          const to = path.join(SRC_ASSETS_PATH, dirName, fileContent.file);
+          writeToTree(tree, to, fileContent.content as string);
+        });
+
+      if (!dir.subdirs.length) {
+        return;
+      }
+      dir.subdirs.forEach(sub => deepCopyDir(path.join(dir.path, sub), sub));
+    }
+
     return tree;
   };
 }
