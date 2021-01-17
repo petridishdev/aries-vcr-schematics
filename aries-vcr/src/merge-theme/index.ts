@@ -33,8 +33,10 @@ interface ISharedComponentUrl {
 
 const SRC_PATH = './src';
 const ACTIVE_THEMES_PATH = 'themes/_active';
+const ACTIVE_PREFIX = '(\\.*/*)*_active/';
+const ACTIVE_SUFFIX = '.*/(.*\\..*)';
+const ACTIVE_CUSTOM_SUFFIX = '.*/(.*\\.custom)';
 const ACTIVE_THEMES_PREFIX = '(\\.*/*)*themes/_active/';
-const ACTIVE_THEMES_SUFFIX = '.*/(.*\\..*)';
 const APP_MODULE_PATH = path.join(SRC_PATH, 'app');
 const SRC_STYLES_PATH = path.join(SRC_PATH, 'styles');
 const SRC_ASSETS_PATH = path.join(SRC_PATH, 'assets');
@@ -62,6 +64,7 @@ export function mergeTheme(_options: any): Rule {
         moveTheme(_options, descriptors, sharedReferences),
         updateThemeImports(_options, descriptors, sharedReferences),
         moveIndex(_options),
+        moveOverrides(_options),
         updateAngularProject(_options),
       ]);
       return rule(tree, _context);
@@ -93,7 +96,8 @@ export function moveShared(_options: any, shared: ISharedComponentUrl[]): Rule {
       .filter(url => url.content !== undefined)
       .forEach(url => {
         const sharedPath = path.join(SHARED_STYLES_PATH, url.text);
-        const sharedContent = url.content as string;
+        let sharedContent = url.content as string;
+        sharedContent = moveCustomReferences(sharedContent);
         writeToTree(tree, sharedPath, sharedContent);
       });
 
@@ -114,9 +118,13 @@ export function moveTheme(_options: any, descriptors: IComponentDescriptor[], sh
           continue;
         }
 
-        const content = readPath(tree, from);
+        let content = readPath(tree, from);
         if (content === undefined) {
           continue;
+        }
+
+        if (path.parse(from).ext.match('\\.(s?c)ss')) {
+          content = moveCustomReferences(content);
         }
         writeToTree(tree, to, content);
       }
@@ -162,6 +170,21 @@ export function moveIndex(_options: any) {
 
     return tree;
   };
+}
+
+export function moveOverrides(_options: any): Rule {
+  return (tree: Tree, _context: SchematicContext) => {
+    tree.getDir(SRC_PATH).visit((filePath: Path) => {
+      if (filePath.includes('.custom.scss')) {
+        const fileContent = readPath(tree, filePath);
+        if (fileContent !== undefined) {
+          const to = `${SHARED_STYLES_PATH}/custom/${path.parse(filePath).base}`;
+          writeToTree(tree, to, fileContent as string);
+        }
+      }
+    });
+    return tree;
+  }
 }
 
 export function updateAngularProject(_options: any): Rule {
@@ -213,6 +236,18 @@ export function updateAngularProject(_options: any): Rule {
 
 /**
  * 
+ * @param content string
+ */
+function moveCustomReferences(content: string) {
+  const regex = new RegExp(`('|")${ACTIVE_PREFIX}${ACTIVE_CUSTOM_SUFFIX}('|")`, 'g');
+  if (content?.match(regex)) {
+    content = content?.replace(regex, `"${SHARED_STYLES_PATH}/custom/$3"`);
+  }
+  return content;
+}
+
+/**
+ * 
  * @param tree Tree
  * @param to string
  * @param content string
@@ -248,7 +283,7 @@ export function updateThemeImports(_options: any, descriptors: IComponentDescrip
         const sharedRegex = new RegExp(`('|")${ACTIVE_THEMES_PREFIX}${url.formatted}('|")`);
         content = content?.replace(sharedRegex, `'${relativePath}/shared/styles/${url.formatted}'`);
       });
-      const regex = new RegExp(`('|")${ACTIVE_THEMES_PREFIX}${ACTIVE_THEMES_SUFFIX}('|")`, 'g');
+      const regex = new RegExp(`('|")${ACTIVE_THEMES_PREFIX}${ACTIVE_SUFFIX}('|")`, 'g');
       content = content?.replace(regex, `'./$3'`);
 
       if (content === undefined) {
